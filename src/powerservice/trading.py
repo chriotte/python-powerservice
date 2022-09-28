@@ -8,6 +8,7 @@ import uuid
 
 import numpy as np
 import pandas as pd
+import math
 
 
 def check_if_valid_date(date: str):
@@ -84,9 +85,70 @@ def get_trades(date: str):
 
     return open_trades_list
 
+def data_quality_check(df):
+    
+    df[['hour', 'minutes']] = df['time'].str.split(':', expand=True)
+
+    # Derive quality check fields
+    df['time_is_nan'] = pd.to_numeric(df['hour']).apply(lambda x: True if math.isnan(x) else False)
+    df['date_is_valid'] = df['date'].apply(lambda x: check_if_valid_date(x))
+    df['missing_vol_values'] = pd.to_numeric(df['volume']).apply(lambda x: True if math.isnan(x) else False)
+    
+    dq_dict = {'Time Interval Check': {
+                # Check time values if NaN (Invalid) else Valid
+                'Valid': len(df.loc[df['time_is_nan'] == False].index), 
+                'Invalid': len(df.loc[df['time_is_nan'] ==True].index),
+                'Total': len(df.index)
+            },
+           'Correct Time Format': {
+                # Check date values
+                'Valid': len(df.loc[df['date_is_valid'] == True].index), 
+                'Invalid': len(df.loc[df['date_is_valid'] == False].index), 
+                'Total': len(df.index)
+            },
+           'Missing Volume Values': {
+                # Check volume if NaN (Invalid) else Valid
+                'Valid': len(df.loc[df['missing_vol_values'] == False].index), 
+                'Invalid': len(df.loc[df['missing_vol_values'] == True].index), 
+                'Total': len(df.index)
+            },
+        }
+    
+    df = pd.DataFrame.from_dict(dq_dict)
+            
+    return df
+
+def summarise_data(df):    
+    
+    """ Derive hours from local time, 
+        subtract 1 to align with business day (23:00 to 22:00),
+        Append :00 to get back to local time, 
+        Summarise volume by local time.
+    """
+    # Derive hours, minutes
+    df[['hour', 'minutes']] = df['time'].str.split(':', expand=True)   
+    
+    # Fill NaN with previous hour
+    df['hour'].fillna(method='pad', inplace=True)
+
+    # Align hour to business clock
+    df['hour'] = pd.to_numeric(df['hour']) - 1
+    df.loc[df['hour'] == -1,'hour'] = 23
+    df['hour'] = df['hour'].apply(lambda x: str(x)+':00' if x >= 10 else '0'+str(x)+':00')
+
+    # Group Volume by Time and rename columns to business header
+    df = df.groupby(['hour'], sort=False, as_index=False)['volume'].aggregate(sum)
+    df.columns = ['Local Time', 'Volume']
+
+    return df
+
+def save_csv(df, path, index=False):
+    # Save df as csv    
+    df.to_csv(path, index=index)
+
 
 if __name__ == '__main__':
     trades = get_trades(date='01/03/2022')
     df = pd.DataFrame(trades[0])
     print(df)
-
+    
